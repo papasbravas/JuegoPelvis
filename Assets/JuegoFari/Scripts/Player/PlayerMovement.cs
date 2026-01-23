@@ -1,42 +1,50 @@
+using System;
+using Unity.VisualScripting;
 using UnityEngine;
 using UnityEngine.InputSystem;
 
+[RequireComponent(typeof(CharacterController))] // Asegura que el GameObject tenga un CharacterController
 public class PlayerMovement : MonoBehaviour
 {
-    [Header("Movimiento")]
-    [SerializeField] private float moveSpeed = 5f; // Velocidad de movimiento del jugador
-    [SerializeField] private float jumpForce = 3f; // Fuerza de salto del jugador
-    [SerializeField] private float gravity = -9.81f; // Fuerza de gravedad aplicada al jugador
+    [Header("Movimiento")] public float moveSpeed = 5f; // Velocidad de movimiento del jugador
 
-    private CharacterController characterController; // Componente CharacterController del jugador
+    [Header("Salto / Gravedad")] public float jumpHeight = 2f; // Altura del salto
+    public float gravity = -9.81f; // Aceleración debida a la gravedad
+
+    private CharacterController characterController; // Referencia al componente CharacterController
 
     [SerializeField] private Vector2 moveInput; // Entrada de movimiento del jugador
     private float verticalVelocity; // Velocidad vertical del jugador
-    private bool jumpRequest = false; // Indica si se ha solicitado un salto
+    private bool jumpRequested = false; // Indica si se ha solicitado un salto
 
-    [SerializeField] private Animator animator; // Componente Animator del jugador
-    private bool isGrounded; // Indica si el jugador está en el suelo
+    [SerializeField] private AudioSource salto; // Sonido de salto
+    [SerializeField] private AudioSource pasos; // Sonido de pasos
+    [SerializeField] private int minSpeedSound = 1; // Velocidad mínima para reproducir el sonido de pasos
 
-    private void Start()
+    [SerializeField] private Animator animator; // Referencia al componente Animator
+
+    private bool isGrounded; // Variable para verificar si el jugador está en el suelo
+
+    // Start is called once before the first execution of Update after the MonoBehaviour is created
+    void Start()
     {
         animator = GetComponent<Animator>(); // Obtener el componente Animator
         characterController = GetComponent<CharacterController>(); // Obtener el componente CharacterController
     }
 
-    private void OnMove(InputValue value)
+    private void OnMove(InputValue value) 
     {
-        moveInput = value.Get<Vector2>();
+        moveInput = value.Get<Vector2>(); // Obtener la entrada de movimiento del jugador
     }
 
-    private void Update()
+    // Update is called once per frame
+    void Update()
     {
-        if(characterController == null)
-        {
+        if (characterController == null) // Verificar si el CharacterController es nulo
             return;
-        }
-
-        ControlMovimiento(); // Controlar el movimiento del jugador
-        //ControlAnimacion(); // Controlar la animación del jugador
+        ControlMovimiento();
+        ControlAnimacion();
+        SonidoPasos();
     }
 
     private void ControlAnimacion()
@@ -50,39 +58,75 @@ public class PlayerMovement : MonoBehaviour
         animator.SetFloat("Z", verticalVelocity); // Actualizar el parámetro "Z" del Animator
     }
 
-    private void ControlMovimiento()
+    private void SonidoPasos() // Reproducir sonido de pasos al moverse
     {
-        isGrounded = characterController.isGrounded; // Verificar si el jugador está en el suelo
-
-        if(isGrounded && verticalVelocity < 0)
+        if (pasos == null)
         {
-            verticalVelocity = -2f; // Asegurar que el jugador esté pegado al suelo
+            return;
         }
+        Vector3 v = characterController.velocity; // Obtener la velocidad del CharacterController
+        v.y = 0; // Ignorar la componente vertical de la velocidad
+        bool andando = characterController.isGrounded && v.magnitude > minSpeedSound; // Comprobar si el jugador está en el suelo y se está moviendo
 
-        // Crear un vector de movimiento local basado en la entrada del jugador
-        Vector3 localMove = new Vector3(moveInput.x, 0, moveInput.y); 
-
-        Vector3 worldMove = transform.TransformDirection(localMove); // Convertir el vector de movimiento local a mundial
-
-        if(worldMove.sqrMagnitude > 1f)
+        if (andando)
         {
-            worldMove.Normalize(); // Normalizar el vector de movimiento si su magnitud es mayor a 1
+            if (!pasos.isPlaying) // Reproducir el sonido de pasos si no se está reproduciendo
+            {
+                pasos.Play();
+            }
+            else if (pasos.isPlaying) // Detener el sonido de pasos si no se está moviendo
+            {
+                pasos.Stop();
+            }
         }
-
-        Vector3 horizontalVelocity = worldMove * moveSpeed; // Calcular la velocidad horizontal del jugador
-
-        if(isGrounded && jumpRequest)
-        {
-            //animator.SetTrigger("Jump"); // Activar la animación de salto
-            verticalVelocity = Mathf.Sqrt(jumpForce * -2f * gravity); // Calcular la velocidad vertical para el salto
-            jumpRequest = false; // Resetear la solicitud de salto
-        }
-
-        verticalVelocity += gravity * Time.deltaTime; // Aplicar la gravedad a la velocidad vertical
-        horizontalVelocity.y = verticalVelocity; // Asignar la velocidad vertical a la velocidad horizontal
-        characterController.Move(horizontalVelocity * Time.deltaTime); // Mover el jugador usando el CharacterController
-
     }
 
-}
+    private void OnJump(InputValue value)
+    {
+        // Solicitar un salto si el botón de salto está presionado y el jugador está en el suelo
+        if (value.isPressed && characterController.isGrounded) 
+            jumpRequested = true;
+    }
 
+    private void ControlMovimiento()
+    {
+        // Si no está en el suelo, no permitimos que quede un salto pendiente
+        if (!isGrounded)
+            jumpRequested = false;
+
+        isGrounded = characterController.isGrounded;
+        //Reset vertical al tocar suelo
+        if (isGrounded && verticalVelocity < 0f)
+            verticalVelocity = -2f;
+
+        //Movimiento local XZ
+        Vector3 localMove = new Vector3(moveInput.x, 0, moveInput.y);
+
+        //convertir de local a mundo
+        Vector3 worldMove = transform.TransformDirection(localMove);
+
+        if (worldMove.sqrMagnitude > 1f)
+            worldMove.Normalize();
+
+        Vector3 horizontalVelocity = worldMove * moveSpeed;
+        //Salto
+        if (isGrounded && jumpRequested)
+        {
+            if (salto != null)
+            {
+                salto.Play();
+            }
+            animator.SetTrigger("Saltar"); // Activar la animación de salto
+            verticalVelocity = Mathf.Sqrt(jumpHeight * -2f * gravity); // Calcular la velocidad vertical para el salto
+            jumpRequested = false; // Resetear la solicitud de salto
+        }
+
+
+        /////////Salto
+        verticalVelocity += gravity * Time.deltaTime; // Aplicar gravedad a la velocidad vertical
+        //  Vector3 velocity = horizontalVelocity;
+        // velocity.y = verticalVelocity;
+        horizontalVelocity.y = verticalVelocity; // Asignar la velocidad vertical al movimiento horizontal
+        characterController.Move(horizontalVelocity * Time.deltaTime); // Mover el CharacterController
+    }
+}
